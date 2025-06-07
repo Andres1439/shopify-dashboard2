@@ -37,8 +37,13 @@ import {
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 
+/* 
+ * Loader para obtener datos iniciales
+ * Simula una API con datos de configuración del chatbot,
+ * métricas y tickets
+ */
 export const loader = async () => {
-  // Simular datos de la API
+  // Configuración inicial del chatbot
   const chatbotConfig = {
     name: "ShopBot",
     status: "active",
@@ -65,6 +70,7 @@ export const loader = async () => {
     ]
   };
 
+  // Métricas del chatbot
   const metrics = {
     totalConversations: 1243,
     resolutionRate: 87,
@@ -73,6 +79,7 @@ export const loader = async () => {
     ticketsCreated: 56
   };
 
+  // Tickets de soporte
   const tickets = [
     {
       id: "T12345",
@@ -103,10 +110,17 @@ export const loader = async () => {
   return json({ chatbotConfig, metrics, tickets });
 };
 
+/* 
+ * Componente principal de la página del chatbot
+ * Maneja la interfaz de usuario y la lógica del chatbot
+ */
 export default function ChatbotPage() {
+  // Obtener datos del loader
   const { chatbotConfig, metrics, tickets } = useLoaderData();
   const navigation = useNavigation();
   const app = useAppBridge();
+
+  // Estados del componente
   const [activeTab, setActiveTab] = useState(0);
   const [config, setConfig] = useState(chatbotConfig);
   const [newResponse, setNewResponse] = useState({

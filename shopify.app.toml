@@ -3,7 +3,7 @@
 client_id = "599a8233585663068d4515f7e61b0ef8"
 name = "Verify COD Orders"
 handle = "verify-cod-orders-1"
-application_url = "https://giants-hairy-productivity-acquired.trycloudflare.com"
+application_url = "https://fiscal-scuba-rpm-convicted.trycloudflare.com"
 embedded = true
 
 [build]
@@ -23,13 +23,13 @@ api_version = "2025-04"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products"
+scopes = "write_products,read_products,read_orders,write_orders"
 
 [auth]
 redirect_urls = [
-  "https://giants-hairy-productivity-acquired.trycloudflare.com/auth/callback",
-  "https://giants-hairy-productivity-acquired.trycloudflare.com/auth/shopify/callback",
-  "https://giants-hairy-productivity-acquired.trycloudflare.com/api/auth/callback"
+  "https://fiscal-scuba-rpm-convicted.trycloudflare.com/auth/callback",
+  "https://fiscal-scuba-rpm-convicted.trycloudflare.com/auth/shopify/callback",
+  "https://fiscal-scuba-rpm-convicted.trycloudflare.com/api/auth/callback"
 ]
 
 [pos]
