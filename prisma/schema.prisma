@@ -1,0 +1,276 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Tabla de sesiones de Shopify (requerida por shopify-app-session-storage-prisma)
+model Session {
+  id            String   @id @default(cuid())
+  shop          String
+  state         String
+  isOnline      Boolean  @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt? // Usar BigInt? para compatibilidad con IDs de usuario de Shopify
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean  @default(false)
+  locale        String?
+  collaborator  Boolean? @default(false)
+  emailVerified Boolean? @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Tipos enumerados
+enum SubscriptionPlan {
+  FREE
+  BASIC
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  TRIAL
+  TRIALING
+}
+
+enum SenderType {
+  customer
+  bot
+  agent
+}
+
+enum MessageType {
+  text
+  image
+  product_card
+  order_info
+}
+
+enum ConversationStatus {
+  active
+  closed
+  escalated
+}
+
+enum InteractionType {
+  viewed
+  asked_about
+  added_to_cart
+}
+
+enum AssistanceType {
+  created
+  modified
+  status_check
+}
+
+// Tabla de tiendas
+model shops {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shop_domain            String                   @unique
+  shop_name              String?
+  access_token           String?
+  subscription_plan      SubscriptionPlan?        @default(FREE)
+  subscription_status    SubscriptionStatus?      @default(TRIALING)
+  webhook_endpoints      Json?
+  timezone               String?
+  currency               String?
+  created_at             DateTime                 @default(now())
+  updated_at             DateTime                 @default(now())
+  last_active_at         DateTime?
+  analytics_daily        analytics_daily[]
+  chat_conversations     chat_conversations[]
+  chatbot_configurations chatbot_configurations[]
+  knowledge_base         knowledge_base[]
+  orders_assisted        orders_assisted[]
+  product_interactions   product_interactions[]
+  user_sessions          user_sessions[]
+  webhooks_log           webhooks_log[]
+
+  // Relaciones inversas con Orders y Products
+  orders                 orders[]
+  products               products[]
+
+  @@index([shop_domain])
+}
+
+// Tabla de configuración del chatbot
+model chatbot_configurations {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shop_id              String   @db.Uuid
+  bot_name             String?
+  welcome_message      String?
+  fallback_message     String?
+  business_hours       Json?
+  language             String?
+  personality_settings Json?
+  enabled_features     Json?
+  custom_responses     Json?
+  appearance_settings  Json?
+  created_at           DateTime @default(now())
+  updated_at           DateTime @default(now())
+  shops                shops    @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+// Tabla de conversaciones
+model chat_conversations {
+  id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shop_id               String                 @db.Uuid
+  customer_id           String
+  customer_email        String?
+  customer_name         String?
+  session_id            String?
+  status                ConversationStatus?    @default(active)
+  started_at            DateTime               @default(now())
+  ended_at              DateTime?
+  total_messages        Int?                   @default(0)
+  customer_satisfaction Int?
+  shops                 shops                  @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  chat_messages         chat_messages[]
+  orders_assisted       orders_assisted[]
+  product_interactions  product_interactions[]
+
+  @@index([shop_id, started_at])
+}
+
+// Tabla de mensajes
+model chat_messages {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversation_id    String             @db.Uuid
+  sender_type        SenderType
+  message_content    String
+  message_type       MessageType?       @default(text)
+  metadata           Json?
+  created_at         DateTime           @default(now())
+  is_read            Boolean?           @default(false)
+  chat_conversations chat_conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([conversation_id, created_at])
+}
+
+// Tabla de interacciones con productos
+model product_interactions {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shop_id            String             @db.Uuid
+  conversation_id    String             @db.Uuid
+  product_id         String
+  interaction_type   InteractionType
+  created_at         DateTime           @default(now())
+  chat_conversations chat_conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  shops              shops              @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([shop_id, created_at])
+}
+
+// Tabla de pedidos asistidos
+model orders_assisted {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shop_id            String             @db.Uuid
+  conversation_id    String             @db.Uuid
+  order_id           String
+  assistance_type    AssistanceType
+  order_value        Decimal?           @db.Decimal(10, 2)
+  created_at         DateTime           @default(now())
+  chat_conversations chat_conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  shops              shops              @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+// Tabla de analíticas diarias
+model analytics_daily {
+  id                        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shop_id                   String   @db.Uuid
+  date                      DateTime @db.Date
+  total_conversations       Int?     @default(0)
+  total_messages            Int?     @default(0)
+  avg_response_time         Int?
+  conversion_rate           Decimal? @db.Decimal(5, 2)
+  customer_satisfaction_avg Decimal? @db.Decimal(3, 2)
+  revenue_assisted          Decimal? @db.Decimal(10, 2)
+  top_products_asked        Json?
+  common_questions          Json?
+  shops                     shops    @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([shop_id, date])
+}
+
+// Tabla de base de conocimiento
+model knowledge_base {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shop_id     String   @db.Uuid
+  question    String
+  answer      String
+  category    String?
+  is_active   Boolean? @default(true)
+  usage_count Int?     @default(0)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now())
+  shops       shops    @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+// Tabla de logs de webhooks
+model webhooks_log {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shop_id       String   @db.Uuid
+  webhook_type  String
+  payload       Json
+  processed     Boolean? @default(false)
+  error_message String?
+  created_at    DateTime @default(now())
+  shops         shops    @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+// Tabla de sesiones de usuario
+model user_sessions {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shop_id       String   @db.Uuid
+  user_id       String   @db.Uuid // Asumo que user_id es UUID como otros IDs en tu schema
+  session_token String
+  expires_at    DateTime
+  created_at    DateTime @default(now())
+  shops         shops    @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+
+
+model orders {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  order_id       String   @unique // Asumiendo que es un ID único de Shopify
+  shopId         String   @db.Uuid // Campo para la relación con shops
+  order_number   String?
+  customer_email String?
+  total_price    Decimal  @db.Decimal(10, 2)
+  status         String? // Considera usar un Enum si los estados son fijos
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  shop           shops    @relation(fields: [shopId], references: [id]) // Definición de la relación
+}
+
+model products {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  product_id  String   @unique // Asumiendo que es un ID único de Shopify
+  shopId      String   @db.Uuid // Campo para la relación con shops
+  title       String
+  vendor      String?
+  price       Decimal  @db.Decimal(10, 2)
+  status      String? // Considera usar un Enum si los estados son fijos
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  shop        shops    @relation(fields: [shopId], references: [id]) // Definición de la relación
+}

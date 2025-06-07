@@ -1,0 +1,44 @@
+{% comment %}
+  Chatbot snippet para la tienda (Usando librería @n8n/chat)
+{% endcomment %}
+
+{# Cargar CSS de la librería n8n chat #}
+<link href="https://cdn.jsdelivr.net/npm/@n8n/chat/dist/style.css" rel="stylesheet" />
+
+{# Cargar CSS personalizado #}
+{{ 'chatbot.css' | asset_url | stylesheet_tag }}
+
+<script type="module">
+  import { createChat } from "https://cdn.jsdelivr.net/npm/@n8n/chat/dist/chat.bundle.es.js";
+
+  // Obtener la configuración del tema y posición
+  const theme = '{{ block.settings.chatbot_theme }}';
+  const position = '{{ block.settings.chatbot_position }}';
+
+  // Inicializar el chatbot de n8n
+  const chatInstance = createChat({
+    webhookUrl: "https://andrestorres15.app.n8n.cloud/webhook/71b29523-e74f-40e5-b566-fd6aeaa10bf6/chat",
+    initialMessages: ["Hola! Estoy aquí para ayudarte."],
+    i18n: {
+      en: {
+        title: "Verify",
+        subtitle: "Comienza un chat, nosotros te ayudamos.",
+        inputPlaceholder: "Escribenos un mensaje...",
+      },
+    },
+    // Puedes agregar más opciones de configuración de n8n chat aquí
+  });
+
+  // Aplicar clases de tema y posición al contenedor principal del chat de n8n
+  // La librería n8n chat parece usar la clase 'chat-window' como contenedor principal
+  const chatWindow = document.querySelector('.chat-window');
+  if (chatWindow) {
+    if (theme === 'dark') {
+      chatWindow.classList.add('dark');
+    }
+    // Las clases de posición se manejan en el CSS
+    chatWindow.classList.add(position);
+  }
+</script>
+
+{{ 'chatbot.js' | asset_url | script_tag }} 

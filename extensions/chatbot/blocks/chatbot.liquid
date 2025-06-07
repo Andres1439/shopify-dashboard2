@@ -1,0 +1,42 @@
+{% comment %}
+  Bloque del chatbot
+{% endcomment %}
+
+{% if block.settings.chatbot_enabled %}
+  {% render 'chatbot' %}
+{% endif %}
+
+{% schema %}
+{
+  "name": "Chatbot",
+  "target": "section",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "chatbot_enabled",
+      "label": "Habilitar Chatbot",
+      "default": true
+    },
+    {
+      "type": "select",
+      "id": "chatbot_position",
+      "label": "Posición del Chatbot",
+      "options": [
+        { "label": "Inferior Derecha", "value": "bottom-right" },
+        { "label": "Inferior Izquierda", "value": "bottom-left" }
+      ],
+      "default": "bottom-right"
+    },
+    {
+      "type": "select",
+      "id": "chatbot_theme",
+      "label": "Tema del Chatbot",
+      "options": [
+        { "label": "Claro", "value": "light" },
+        { "label": "Oscuro", "value": "dark" }
+      ],
+      "default": "light"
+    }
+  ]
+}
+{% endschema %} 
