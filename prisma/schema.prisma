@@ -35,54 +35,63 @@ model Session {
   updatedAt     DateTime @updatedAt
 }
 
+enum SubscriptionPlan {
+  FREE
+  BASIC
+  PREMIUM
+  ENTERPRISE
+}
+
+enum TicketStatus {
+  PENDING    // Esperando que un agente lo atienda
+  IN_PROGRESS // Agente asignado y atendiendo
+  RESOLVED   // Resuelto por el agente
+  CLOSED     // Cerrado
+}
+
 model Shop {
   id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   shop_domain       String   @unique
   access_token      String?
-  subscription_plan String? // Ejemplo: 'FREE', 'BASIC', etc.
+  subscription_plan SubscriptionPlan? @default(BASIC)
   created_at        DateTime @default(now())
-  updated_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
 
   // Relaciones
   chatbotConfigurations ChatbotConfiguration[]
-  conversations        ChatConversation[]
+  tickets              Ticket[]
 }
 
 model ChatbotConfiguration {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   shop_id         String   @db.Uuid
-  bot_name        String?
-  welcome_message String?
+  bot_name        String   @default("Verify")
+  welcome_message String   @default("Hola! Estoy aquí para ayudarte.")
+  webhook_url     String?  
+  is_active       Boolean  @default(true)
   created_at      DateTime @default(now())
-  updated_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
 
   // Relaciones
   shop Shop @relation(fields: [shop_id], references: [id])
 }
 
-model ChatConversation {
+model Ticket {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   shop_id         String   @db.Uuid
-  customer_email  String?
-  session_id      String?
-  status          String?  // Ejemplo: 'active', 'ended'mv
-  started_at      DateTime @default(now())
-  ended_at        DateTime?
+  session_id      String?  // ID de la sesión de chat relacionada
+  customer_email  String   // Email del cliente que solicita atención
+  subject         String   // Asunto o motivo de la solicitud
+  message         String   // Mensaje inicial del cliente
+  status          TicketStatus @default(PENDING)
+  agent_id        String?  // ID del agente asignado
   created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  assigned_at     DateTime? // Cuando se asignó a un agente
+  resolved_at     DateTime?
+  closed_at       DateTime?
 
   // Relaciones
-  shop     Shop         @relation(fields: [shop_id], references: [id])
-  messages ChatMessage[]
-}
-
-model ChatMessage {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  conversation_id String   @db.Uuid
-  sender_type     String   // Ejemplo: 'bot' o 'customer'
-  message_content String
-  created_at      DateTime @default(now())
-
-  // Relaciones
-  conversation ChatConversation @relation(fields: [conversation_id], references: [id])
+  shop Shop @relation(fields: [shop_id], references: [id])
 }
 

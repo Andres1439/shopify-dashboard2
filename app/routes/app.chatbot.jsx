@@ -35,79 +35,95 @@ import {
   SettingsIcon
 } from "@shopify/polaris-icons";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
+import { authenticate } from "../shopify.server";
+import db from "../db.server";
 
 /* 
  * Loader para obtener datos iniciales
  * Simula una API con datos de configuración del chatbot,
  * métricas y tickets
  */
-export const loader = async () => {
-  // Configuración inicial del chatbot
-  const chatbotConfig = {
-    name: "ShopBot",
-    status: "active",
-    welcomeMessage: "¡Hola! ¿En qué puedo ayudarte hoy?",
-    personality: "friendly",
-    schedule: {
-      start: "09:00",
-      end: "18:00",
-      timezone: "America/Mexico_City"
-    },
-    responses: [
-      {
-        id: "1",
-        question: "¿Cuánto cuesta el envío?",
-        answer: "El envío es gratuito para compras mayores a $500",
-        triggers: ["envío", "costo envío", "gratis"]
-      },
-      {
-        id: "2",
-        question: "¿Cuánto tarda en llegar?",
-        answer: "El tiempo de entrega es de 3-5 días hábiles",
-        triggers: ["tiempo entrega", "días llegada"]
-      }
-    ]
-  };
+export const loader = async ({ request }) => {
+  const { admin, session } = await authenticate.admin(request);
 
-  // Métricas del chatbot
-  const metrics = {
-    totalConversations: 1243,
-    resolutionRate: 87,
-    avgResponseTime: 1.2,
-    satisfactionRate: 92,
-    ticketsCreated: 56
-  };
-
-  // Tickets de soporte
-  const tickets = [
-    {
-      id: "T12345",
-      customer: "Juan Pérez",
-      email: "juan@example.com",
-      reason: "Problema con pedido",
-      date: "2023-10-27",
-      status: "open"
-    },
-    {
-      id: "T12346",
-      customer: "María García",
-      email: "maria@example.com",
-      reason: "Consulta de producto",
-      date: "2023-10-27",
-      status: "resolved"
-    },
-    {
-      id: "T12347",
-      customer: "Carlos López",
-      email: "carlos@example.com",
-      reason: "Información de envío",
-      date: "2023-10-26",
-      status: "pending"
+  // Primero obtener la tienda
+  const shop = await db.shop.findUnique({
+    where: {
+      shop_domain: session.shop
     }
-  ];
+  });
 
-  return json({ chatbotConfig, metrics, tickets });
+  if (!shop) {
+    return json({ 
+      chatbotConfig: {
+        bot_name: "",
+        welcome_message: "",
+        is_active: true
+      },
+      tickets: []
+    });
+  }
+
+  // Obtener la configuración del chatbot
+  const chatbotConfig = await db.chatbotConfiguration.findFirst({
+    where: {
+      shop_id: shop.id
+    }
+  }) || {
+    bot_name: "",
+    welcome_message: "",
+    is_active: true
+  };
+
+  // Obtener los tickets de la base de datos
+  const tickets = await db.ticket.findMany({
+    where: {
+      shop_id: shop.id
+    },
+    orderBy: {
+      created_at: 'desc'
+    },
+    select: {
+      id: true,
+      customer_email: true,
+      subject: true,
+      status: true,
+      created_at: true,
+      message: true
+    }
+  });
+
+  // Transformar los tickets al formato esperado por la interfaz
+  const formattedTickets = tickets.map(ticket => ({
+    id: ticket.id,
+    customer: ticket.customer_email,
+    email: ticket.customer_email,
+    reason: ticket.subject,
+    date: ticket.created_at.toISOString().split('T')[0],
+    status: ticket.status
+  }));
+
+  return json({ 
+    chatbotConfig, 
+    tickets: formattedTickets 
+  });
+};
+
+export const action = async ({ request }) => {
+  const { admin } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const ticketId = formData.get("ticketId");
+  const newStatus = formData.get("status");
+
+  if (ticketId && newStatus) {
+    await db.ticket.update({
+      where: { id: ticketId },
+      data: { status: newStatus }
+    });
+  }
+
+  return json({ success: true });
 };
 
 /* 
@@ -116,36 +132,26 @@ export const loader = async () => {
  */
 export default function ChatbotPage() {
   // Obtener datos del loader
-  const { chatbotConfig, metrics, tickets } = useLoaderData();
+  const { chatbotConfig, tickets } = useLoaderData();
   const navigation = useNavigation();
   const app = useAppBridge();
+  const submit = useSubmit();
 
   // Estados del componente
   const [activeTab, setActiveTab] = useState(0);
   const [config, setConfig] = useState(chatbotConfig);
-  const [newResponse, setNewResponse] = useState({
-    question: "",
-    answer: "",
-    triggers: ""
-  });
-  const [activeModal, setActiveModal] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
 
   const tabs = [
     {
-      id: "dashboard",
-      content: "Dashboard",
-      panelID: "dashboard-content"
-    },
-    {
-      id: "conversations",
-      content: "Conversaciones",
-      panelID: "conversations-content"
-    },
-    {
       id: "configuration",
       content: "Configuración",
       panelID: "configuration-content"
+    },
+    {
+      id: "tickets",
+      content: "Tickets",
+      panelID: "tickets-content"
     }
   ];
 
@@ -156,23 +162,40 @@ export default function ChatbotPage() {
     });
   };
 
-  const addResponse = () => {
-    if (newResponse.question && newResponse.answer) {
-      setConfig({
-        ...config,
-        responses: [
-          ...config.responses,
-          {
-            id: Date.now().toString(),
-            question: newResponse.question,
-            answer: newResponse.answer,
-            triggers: newResponse.triggers.split(",").map(t => t.trim())
-          }
-        ]
-      });
-      setNewResponse({ question: "", answer: "", triggers: "" });
-      setActiveModal(null);
-    }
+  const updateTicketStatus = (ticketId, newStatus) => {
+    const formData = new FormData();
+    formData.append("ticketId", ticketId);
+    formData.append("status", newStatus);
+    submit(formData, { method: "post" });
+  };
+
+  const getStatusBadge = (status, ticketId) => {
+    const statusConfig = {
+      PENDING: { tone: "warning", label: "Pendiente" },
+      IN_PROGRESS: { tone: "info", label: "En Progreso" },
+      RESOLVED: { tone: "success", label: "Resuelto" },
+      CLOSED: { tone: "critical", label: "Cerrado" }
+    };
+
+    const config = statusConfig[status] || { tone: "attention", label: status };
+    return (
+      <Select
+        label=""
+        labelHidden
+        options={getStatusOptions()}
+        value={status}
+        onChange={(value) => updateTicketStatus(ticketId, value)}
+      />
+    );
+  };
+
+  const getStatusOptions = () => {
+    return [
+      { label: "Pendiente", value: "PENDING" },
+      { label: "En Progreso", value: "IN_PROGRESS" },
+      { label: "Resuelto", value: "RESOLVED" },
+      { label: "Cerrado", value: "CLOSED" }
+    ];
   };
 
   const filteredTickets = tickets.filter(ticket =>
@@ -185,32 +208,11 @@ export default function ChatbotPage() {
     <Page
       title="Chatbot AI"
       subtitle="Configuración y análisis de tu asistente virtual"
-      primaryAction={{
-        content: "Nueva respuesta",
-        icon: CheckIcon,
-        onAction: () => setActiveModal("new-response")
-      }}
     >
       <TitleBar title="Chatbot AI" />
       
       <Tabs
-        tabs={[
-          {
-            id: "dashboard",
-            content: "Dashboard",
-            panelID: "dashboard-content"
-          },
-          {
-            id: "conversations",
-            content: "Conversaciones",
-            panelID: "conversations-content"
-          },
-          {
-            id: "configuration",
-            content: "Configuración",
-            panelID: "configuration-content"
-          }
-        ]}
+        tabs={tabs}
         selected={activeTab}
         onSelect={setActiveTab}
       >
@@ -236,97 +238,49 @@ export default function ChatbotPage() {
                   </Banner>
 
                   <Card>
-                    <div style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                      gap: "1rem",
-                      padding: "1.5rem"
-                    }}>
-                      <Box padding="400">
-                        <Text as="h3" variant="headingSm">Conversaciones totales</Text>
-                        <Text as="p" variant="headingXl">{metrics.totalConversations}</Text>
-                        <Text as="p" variant="bodySm" tone="success">
-                          +12% desde el mes pasado
-                        </Text>
-                      </Box>
-                      <Box padding="400">
-                        <Text as="h3" variant="headingSm">Tasa de resolución</Text>
-                        <Text as="p" variant="headingXl">{metrics.resolutionRate}%</Text>
-                        <Text as="p" variant="bodySm" tone="success">
-                          +5.2% desde el mes pasado
-                        </Text>
-                      </Box>
-                      <Box padding="400">
-                        <Text as="h3" variant="headingSm">Tiempo respuesta</Text>
-                        <Text as="p" variant="headingXl">{metrics.avgResponseTime}s</Text>
-                        <Text as="p" variant="bodySm" tone="critical">
-                          -0.3s desde el mes pasado
-                        </Text>
-                      </Box>
-                      <Box padding="400">
-                        <Text as="h3" variant="headingSm">Satisfacción</Text>
-                        <Text as="p" variant="headingXl">{metrics.satisfactionRate}%</Text>
-                        <Text as="p" variant="bodySm" tone="success">
-                          +3.1% desde el mes pasado
-                        </Text>
-                      </Box>
-                    </div>
+                    <BlockStack gap="400">
+                      <TextField
+                        label="Nombre del bot"
+                        value={config.name}
+                        onChange={(value) => setConfig({ ...config, name: value })}
+                        autoComplete="off"
+                      />
+                      <TextField
+                        label="Mensaje de bienvenida"
+                        value={config.welcomeMessage}
+                        onChange={(value) => setConfig({ ...config, welcomeMessage: value })}
+                        multiline={4}
+                        autoComplete="off"
+                      />
+                    </BlockStack>
+                  </Card>
+
+                  <Card>
+                    <BlockStack gap="400">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text as="h3" variant="headingMd">Tickets recientes</Text>
+                        <Button
+                          variant="plain"
+                          onClick={() => setActiveTab(1)}
+                          icon={ChatIcon}
+                        >
+                          Ver todos los tickets
+                        </Button>
+                      </InlineStack>
+                      <DataTable
+                        columnContentTypes={["text", "text", "text", "text", "text"]}
+                        headings={["ID", "Cliente", "Motivo", "Fecha", "Estado"]}
+                        rows={tickets.slice(0, 3).map(ticket => [
+                          ticket.id,
+                          ticket.customer,
+                          ticket.reason,
+                          ticket.date,
+                          getStatusBadge(ticket.status, ticket.id)
+                        ])}
+                      />
+                    </BlockStack>
                   </Card>
                 </BlockStack>
-              </Layout.Section>
-
-              <Layout.Section variant="oneThird">
-                <Card>
-                  <BlockStack gap="400">
-                    <Text as="h3" variant="headingMd">Respuestas frecuentes</Text>
-                    <List type="bullet">
-                      {config.responses.slice(0, 5).map((response) => (
-                        <List.Item key={response.id}>
-                          <Text as="span" fontWeight="medium">{response.question}</Text>
-                        </List.Item>
-                      ))}
-                    </List>
-                    <Button
-                      variant="plain"
-                      onClick={() => setActiveTab(2)}
-                      icon={SettingsIcon}
-                    >
-                      Ver todas las respuestas
-                    </Button>
-                  </BlockStack>
-                </Card>
-              </Layout.Section>
-
-              <Layout.Section>
-                <Card>
-                  <BlockStack gap="400">
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text as="h3" variant="headingMd">Tickets recientes</Text>
-                      <Button
-                        variant="plain"
-                        onClick={() => setActiveTab(1)}
-                        icon={ChatIcon}
-                      >
-                        Ver todos los tickets
-                      </Button>
-                    </InlineStack>
-                    <DataTable
-                      columnContentTypes={["text", "text", "text", "text", "text"]}
-                      headings={["ID", "Cliente", "Motivo", "Fecha", "Estado"]}
-                      rows={tickets.slice(0, 3).map(ticket => [
-                        ticket.id,
-                        ticket.customer,
-                        ticket.reason,
-                        ticket.date,
-                        <Badge
-                          tone={ticket.status === "resolved" ? "success" : ticket.status === "pending" ? "warning" : "attention"}
-                        >
-                          {ticket.status === "resolved" ? "Resuelto" : ticket.status === "pending" ? "Pendiente" : "Abierto"}
-                        </Badge>
-                      ])}
-                    />
-                  </BlockStack>
-                </Card>
               </Layout.Section>
             </>
           )}
@@ -370,11 +324,7 @@ export default function ChatbotPage() {
                         ticket.email,
                         ticket.reason,
                         ticket.date,
-                        <Badge
-                          tone={ticket.status === "resolved" ? "success" : ticket.status === "pending" ? "warning" : "attention"}
-                        >
-                          {ticket.status === "resolved" ? "Resuelto" : ticket.status === "pending" ? "Pendiente" : "Abierto"}
-                        </Badge>
+                        getStatusBadge(ticket.status, ticket.id)
                       ])}
                       pagination={{
                         hasNext: true,
@@ -386,217 +336,8 @@ export default function ChatbotPage() {
               </Card>
             </Layout.Section>
           )}
-
-          {activeTab === 2 && (
-            <Layout.Section>
-              <Card>
-                <BlockStack gap="400">
-                  <Text as="h2" variant="headingMd">Configuración del Chatbot</Text>
-                  
-                  <Divider />
-                  
-                  <ChoiceList
-                    title="Estado del Chatbot"
-                    choices={[
-                      { label: "Activo", value: "active" },
-                      { label: "Inactivo", value: "inactive" }
-                    ]}
-                    selected={[config.status]}
-                    onChange={(value) => setConfig({ ...config, status: value[0] })}
-                  />
-
-                  <TextField
-                    label="Nombre del Chatbot"
-                    value={config.name}
-                    onChange={(value) => setConfig({ ...config, name: value })}
-                    autoComplete="off"
-                  />
-
-                  <TextField
-                    label="Mensaje de bienvenida"
-                    value={config.welcomeMessage}
-                    onChange={(value) => setConfig({ ...config, welcomeMessage: value })}
-                    multiline={4}
-                    autoComplete="off"
-                  />
-
-                  <Select
-                    label="Personalidad del bot"
-                    options={[
-                      { label: "Amigable", value: "friendly" },
-                      { label: "Profesional", value: "professional" },
-                      { label: "Entusiasta", value: "enthusiastic" },
-                      { label: "Directo", value: "direct" }
-                    ]}
-                    value={config.personality}
-                    onChange={(value) => setConfig({ ...config, personality: value })}
-                  />
-
-                  <Divider />
-
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h3" variant="headingSm">Horario de atención</Text>
-                    <Button
-                      variant="plain"
-                      onClick={() => setActiveModal("schedule")}
-                    >
-                      Editar horario
-                    </Button>
-                  </InlineStack>
-
-                  <Text as="p" variant="bodyMd">
-                    {config.schedule.start} - {config.schedule.end} ({config.schedule.timezone})
-                  </Text>
-
-                  <Divider />
-
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h3" variant="headingSm">Respuestas automáticas</Text>
-                    <Button
-                      variant="primary"
-                      onClick={() => setActiveModal("new-response")}
-                    >
-                      Añadir respuesta
-                    </Button>
-                  </InlineStack>
-
-                  {config.responses.length === 0 ? (
-                    <EmptyState
-                      heading="No hay respuestas configuradas"
-                      image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
-                      action={{
-                        content: "Crear primera respuesta",
-                        onAction: () => setActiveModal("new-response")
-                      }}
-                    >
-                      <p>Crea respuestas automáticas para preguntas frecuentes</p>
-                    </EmptyState>
-                  ) : (
-                    <DataTable
-                      columnContentTypes={["text", "text", "text"]}
-                      headings={["Pregunta", "Respuesta", "Palabras clave"]}
-                      rows={config.responses.map(response => [
-                        response.question,
-                        response.answer,
-                        response.triggers.join(", ")
-                      ])}
-                    />
-                  )}
-                </BlockStack>
-              </Card>
-            </Layout.Section>
-          )}
         </Layout>
       </Tabs>
-
-      {/* Modal para nueva respuesta */}
-      <Modal
-        open={activeModal === "new-response"}
-        onClose={() => setActiveModal(null)}
-        title="Nueva respuesta automática"
-        primaryAction={{
-          content: "Guardar respuesta",
-          onAction: addResponse,
-          disabled: !newResponse.question || !newResponse.answer
-        }}
-        secondaryActions={[
-          {
-            content: "Cancelar",
-            onAction: () => setActiveModal(null)
-          }
-        ]}
-      >
-        <Modal.Section>
-          <BlockStack gap="400">
-            <TextField
-              label="Pregunta común"
-              value={newResponse.question}
-              onChange={(value) => setNewResponse({ ...newResponse, question: value })}
-              placeholder="Ej: ¿Cuánto cuesta el envío?"
-              autoComplete="off"
-            />
-            <TextField
-              label="Respuesta"
-              value={newResponse.answer}
-              onChange={(value) => setNewResponse({ ...newResponse, answer: value })}
-              multiline={4}
-              placeholder="Ej: El envío es gratuito para compras mayores a $500"
-              autoComplete="off"
-            />
-            <TextField
-              label="Palabras clave (separadas por comas)"
-              value={newResponse.triggers}
-              onChange={(value) => setNewResponse({ ...newResponse, triggers: value })}
-              placeholder="Ej: envío, costo envío, gratis"
-              autoComplete="off"
-              helpText="El chatbot responderá con esta respuesta cuando detecte estas palabras"
-            />
-          </BlockStack>
-        </Modal.Section>
-      </Modal>
-
-      {/* Modal para horario */}
-      <Modal
-        open={activeModal === "schedule"}
-        onClose={() => setActiveModal(null)}
-        title="Configurar horario de atención"
-        primaryAction={{
-          content: "Guardar cambios",
-          onAction: () => setActiveModal(null)
-        }}
-        secondaryActions={[
-          {
-            content: "Cancelar",
-            onAction: () => setActiveModal(null)
-          }
-        ]}
-      >
-        <Modal.Section>
-          <BlockStack gap="400">
-            <InlineStack blockAlign="center" gap="400">
-              <TextField
-                label="Hora de inicio"
-                type="time"
-                value={config.schedule.start}
-                onChange={(value) => setConfig({
-                  ...config,
-                  schedule: { ...config.schedule, start: value }
-                })}
-                autoComplete="off"
-              />
-              <TextField
-                label="Hora de fin"
-                type="time"
-                value={config.schedule.end}
-                onChange={(value) => setConfig({
-                  ...config,
-                  schedule: { ...config.schedule, end: value }
-                })}
-                autoComplete="off"
-              />
-            </InlineStack>
-            <Select
-              label="Zona horaria"
-              options={[
-                { label: "Ciudad de México", value: "America/Mexico_City" },
-                { label: "Nueva York", value: "America/New_York" },
-                { label: "Los Ángeles", value: "America/Los_Angeles" },
-                { label: "Madrid", value: "Europe/Madrid" }
-              ]}
-              value={config.schedule.timezone}
-              onChange={(value) => setConfig({
-                ...config,
-                schedule: { ...config.schedule, timezone: value }
-              })}
-            />
-            <Checkbox
-              label="Mostrar mensaje fuera de horario"
-              checked={true}
-              onChange={() => {}}
-            />
-          </BlockStack>
-        </Modal.Section>
-      </Modal>
     </Page>
   );
 }
