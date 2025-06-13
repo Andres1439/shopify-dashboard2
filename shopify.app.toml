@@ -3,7 +3,7 @@
 client_id = "599a8233585663068d4515f7e61b0ef8"
 name = "Verify COD Orders"
 handle = "verify-cod-orders-1"
-application_url = "https://fiscal-scuba-rpm-convicted.trycloudflare.com"
+application_url = "https://earning-sunday-generates-chains.trycloudflare.com"
 embedded = true
 
 [build]
@@ -27,9 +27,9 @@ scopes = "write_products,read_products,read_orders,write_orders"
 
 [auth]
 redirect_urls = [
-  "https://fiscal-scuba-rpm-convicted.trycloudflare.com/auth/callback",
-  "https://fiscal-scuba-rpm-convicted.trycloudflare.com/auth/shopify/callback",
-  "https://fiscal-scuba-rpm-convicted.trycloudflare.com/api/auth/callback"
+  "https://earning-sunday-generates-chains.trycloudflare.com/auth/callback",
+  "https://earning-sunday-generates-chains.trycloudflare.com/auth/shopify/callback",
+  "https://earning-sunday-generates-chains.trycloudflare.com/api/auth/callback"
 ]
 
 [pos]
